@@ -7,10 +7,18 @@ clear; clc; close all;
 % log_name = "log_0_2025-9-20-21-44-46";
 log_name = "log_1_2025-9-20-22-10-26";
 
-
-%% 数据文件路径
 file_path = "./data/" + log_name + "/";
-mat_filename = file_path + log_name + ".mat";
+%% 数据文件路径
+% 在 file_path 目录下查找唯一的 MAT 文件
+mat_files = dir(fullfile(file_path, '*.mat'));
+if isempty(mat_files)
+    error('No MAT file found in %s', file_path);
+elseif numel(mat_files) > 1
+    error('Multiple MAT files found in %s', file_path);
+else
+    mat_filename = fullfile(file_path, mat_files(1).name);
+    fprintf('Found MAT file: %s\n', mat_filename);
+end
 % 在 file_path 目录下查找唯一的 CSV 文件，文件名以 “exp” 开头
 csv_files = dir(fullfile(file_path, 'exp*.csv'));
 if isempty(csv_files)
