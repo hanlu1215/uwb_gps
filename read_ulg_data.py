@@ -120,20 +120,30 @@ def read_ulg_file(ulg_filename):
             print(f"可用的数据主题已保存到: {txt_path}")
         except Exception as e:
             print(f"保存主题列表到txt文件时出错: {e}")
+        
         data = {}
+        topic_name_counter = {}  # 用于跟踪重复的topic名称
         
         # 遍历所有数据主题并保存
         for dataset in ulog.data_list:
             topic_name = dataset.name
             print(f"正在提取主题: {topic_name}")
-            
             try:
                 # 获取数据集
-                topic_data = ulog.get_dataset(topic_name)
+                # topic_data = ulog.get_dataset(topic_name)
+                topic_data = dataset  # 直接使用dataset对象
                 
                 # 为每个主题创建子字典
                 original_topic_name = topic_name
                 topic_name_clean = sanitize_variable_name(topic_name)
+                
+                # 处理重复的topic名称
+                if topic_name_clean in topic_name_counter:
+                    topic_name_counter[topic_name_clean] += 1
+                    topic_name_clean = f"{topic_name_clean}_{topic_name_counter[topic_name_clean]}"
+                    print(f"  检测到重复主题，重命名为: {topic_name_clean}")
+                else:
+                    topic_name_counter[topic_name_clean] = 1
                 
                 # 如果主题名被截断，显示警告
                 if len(original_topic_name) > 31:
