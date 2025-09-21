@@ -4,10 +4,23 @@
 % 日期: 2025-09-20
 clear; clc; close all;
 %% 参数设置
-file_path = "./data/"
-mat_filename = 'px4_flight_data.mat';
+% log_name = "log_0_2025-9-20-21-44-46";
+log_name = "log_1_2025-9-20-22-10-26";
 
-uwb_filename = file_path + 'exp_data_20250920_221238.csv'; % UWB数据文件名
+
+%% 数据文件路径
+file_path = "./data/" + log_name + "/";
+mat_filename = file_path + log_name + ".mat";
+% 在 file_path 目录下查找唯一的 CSV 文件，文件名以 “exp” 开头
+csv_files = dir(fullfile(file_path, 'exp*.csv'));
+if isempty(csv_files)
+    error('No CSV file starting with "exp" found in %s', file_path);
+elseif numel(csv_files) > 1
+    error('Multiple CSV files starting with "exp" found in %s', file_path);
+else
+    uwb_filename = fullfile(file_path, csv_files(1).name);
+    fprintf('Found UWB CSV file: %s\n', uwb_filename);
+end
 
 %% 读取数据
 % 读取UWB数据
@@ -38,33 +51,46 @@ if exist(mat_filename, 'file')
     fprintf('Loading data file: %s\n', mat_filename);
     data = load(mat_filename);
     
-    % 检查数据结构
-    if isfield(data, 'imu_time')
-        % Python生成的数据格式
-        imu_time = data.imu_time;
-        imu_x = data.imu_x;
-        imu_y = data.imu_y;
-        imu_z = data.imu_z;
-        gps_time = data.gps_time;
-        gps_lat = data.gps_lat;
-        gps_lon = data.gps_lon;
-        gps_alt = data.gps_alt;
+    % 从vehicle_local_position主题提取IMU数据
+    if isfield(data, 'vehicle_local_position')
+        fprintf('Using vehicle_local_position data\n');
+        local_pos_time = data.vehicle_local_position.timestamp;
+        local_pos_x = data.vehicle_local_position.x;
+        local_pos_y = data.vehicle_local_position.y;
+        local_pos_z = data.vehicle_local_position.z;
     else
-        % 示例数据格式
-        imu_time = data.t;
-        imu_x = data.imu_x;
-        imu_y = data.imu_y;
-        imu_z = data.imu_z;
-        gps_time = data.t;
-        gps_lat = data.gps_lat;
-        gps_lon = data.gps_lon;
-        gps_alt = data.gps_alt;
+        fprintf('Warning: vehicle_local_position data not found\n');
+        local_pos_time = [];
+        local_pos_x = [];
+        local_pos_y = [];
+        local_pos_z = [];
     end
     
-    % 将IMU时间戳从0开始（减去初始值）
-    if ~isempty(imu_time) && length(imu_time) > 0
-        imu_time = imu_time - imu_time(1);
-        fprintf('IMU time normalized to start from 0\n');
+    % 从vehicle_gps_position主题提取GPS数据
+    if isfield(data, 'vehicle_gps_position')
+        fprintf('Using vehicle_gps_position data\n');
+        gps_time = data.vehicle_gps_position.timestamp;
+        gps_lat = data.vehicle_gps_position.latitude_deg;
+        gps_lon = data.vehicle_gps_position.longitude_deg;
+        gps_alt = data.vehicle_gps_position.altitude_ellipsoid_m;
+    elseif isfield(data, 'vehicle_global_position')
+        fprintf('Using vehicle_global_position data\n');
+        gps_time = data.vehicle_global_position.timestamp;
+        gps_lat = data.vehicle_global_position.latitude_deg;
+        gps_lon = data.vehicle_global_position.longitude_deg;
+        gps_alt = data.vehicle_global_position.altitude_ellipsoid_m;
+    else
+        fprintf('Warning: GPS data not found\n');
+        gps_time = [];
+        gps_lat = [];
+        gps_lon = [];
+        gps_alt = [];
+    end
+    
+    % 将Local position时间戳从0开始（减去初始值）
+    if ~isempty(local_pos_time) && length(local_pos_time) > 0
+        local_pos_time = local_pos_time - local_pos_time(1);
+        fprintf('Local position time normalized to start from 0\n');
     end
     
     % 将GPS时间戳从0开始（减去初始值）
@@ -74,7 +100,7 @@ if exist(mat_filename, 'file')
     end
     
     fprintf('Data loading completed\n');
-    fprintf('IMU data points: %d\n', length(imu_x));
+    fprintf('Local position data points: %d\n', length(local_pos_x));
     fprintf('GPS data points: %d\n', length(gps_lat));
     
 else
@@ -84,321 +110,113 @@ end
 %% Data Visualization
 fprintf('Starting to plot charts...\n');
 
-% 创建主图窗
-figure('Name', 'PX4飞行轨迹分析', 'Position', [100, 100, 1600, 1200]);
+% 创建结果文件夹
+result_path = fullfile(file_path, 'result');
+if ~exist(result_path, 'dir')
+    mkdir(result_path);
+    fprintf('Created result directory: %s\n', result_path);
+end
 
-%% 子图1: IMU本地坐标系3D轨迹
-subplot(4, 3, 1);
-if ~isempty(imu_x) && length(imu_x) > 1
-    plot3(imu_x, imu_y, imu_z, 'b-', 'LineWidth', 2);
+%% 图1: PX4 Local Position 3D轨迹
+figure('Name', 'PX4 Local Position 3D Trajectory', 'Position', [100, 100, 800, 600]);
+if ~isempty(local_pos_x) && length(local_pos_x) > 1
+    plot3(local_pos_x, local_pos_y, local_pos_z, 'b-', 'LineWidth', 2);
     hold on;
-    plot3(imu_x(1), imu_y(1), imu_z(1), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'g'); % 起点
-    plot3(imu_x(end), imu_y(end), imu_z(end), 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r'); % 终点
+    plot3(local_pos_x(1), local_pos_y(1), local_pos_z(1), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'g'); % 起点
+    plot3(local_pos_x(end), local_pos_y(end), local_pos_z(end), 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r'); % 终点
     grid on;
     xlabel('X (m)');
     ylabel('Y (m)');
     zlabel('Z (m)');
-    title('IMU local 3D trajectory');
-    legend('trajectory', 'start', 'end', 'Location', 'best');
-    axis equal;
-else
-    text(0.5, 0.5, 'No IMU Data', 'HorizontalAlignment', 'center');
-    title('IMU local 3D trajectory - No Data');
-end
-
-%% 子图2: IMU本地坐标系XY平面轨迹
-subplot(4, 3, 2);
-if ~isempty(imu_x) && length(imu_x) > 1
-    plot(imu_x, imu_y, 'b-', 'LineWidth', 2);
-    hold on;
-    plot(imu_x(1), imu_y(1), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'g'); % 起点
-    plot(imu_x(end), imu_y(end), 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r'); % 终点
-    grid on;
-    xlabel('X (m)');
-    ylabel('Y (m)');
-    title('IMU local XY trajectory');
-    legend('trajectory', 'start', 'end', 'Location', 'best');
-    axis equal;
-else
-    text(0.5, 0.5, 'No IMU Data', 'HorizontalAlignment', 'center');
-    title('IMU local XY trajectory - No Data');
-end
-
-%% 子图3: UWB XY平面轨迹
-subplot(4, 3, 3);
-if ~isempty(uwb_data) && height(uwb_data) > 1
-    uwb_x = uwb_data.x;
-    uwb_y = uwb_data.y;
-    plot(uwb_x, uwb_y, 'm-', 'LineWidth', 2);
-    hold on;
-    plot(uwb_x(1), uwb_y(1), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'g'); % 起点
-    plot(uwb_x(end), uwb_y(end), 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r'); % 终点
-    grid on;
-    xlabel('X (m)');
-    ylabel('Y (m)');
-    title('UWB XY Trajectory');
-    legend('trajectory', 'start', 'end', 'Location', 'best');
-    axis equal;
-else
-    text(0.5, 0.5, 'No UWB Data', 'HorizontalAlignment', 'center');
-    title('UWB XY Trajectory - No Data');
-end
-
-%% 子图4: IMU高度变化
-subplot(4, 3, 4);
-if ~isempty(imu_z) && length(imu_time) > 1
-    plot(imu_time, imu_z, 'b-', 'LineWidth', 2);
-    grid on;
-    xlabel('time (s)');
-    ylabel('Altitude Z (m)');
-    title('IMU Altitude Variation');
-else
-    text(0.5, 0.5, 'No IMU Altitude Data', 'HorizontalAlignment', 'center');
-    title('IMU altitude variation - No Data');
-end
-
-%% 子图5: GPS全球坐标轨迹
-subplot(4, 3, 5);
-if ~isempty(gps_lat) && length(gps_lat) > 1
-    plot(gps_lon, gps_lat, 'r-', 'LineWidth', 2);
-    hold on;
-    plot(gps_lon(1), gps_lat(1), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'g'); % 起点
-    plot(gps_lon(end), gps_lat(end), 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r'); % 终点
-    grid on;
-    xlabel('Longitude (°)');
-    ylabel('Latitude (°)');
-    title('GPS Global Coordinate Trajectory');
+    title('PX4 Local Position 3D Trajectory', 'FontSize', 14);
     legend('Trajectory', 'Start', 'End', 'Location', 'best');
+    axis equal;
 else
-    text(0.5, 0.5, 'No GPS Data', 'HorizontalAlignment', 'center');
-    title('GPS Global Coordinate Trajectory - No Data');
+    text(0.5, 0.5, 'No PX4 Local Position Data', 'HorizontalAlignment', 'center');
+    title('PX4 Local Position 3D Trajectory - No Data');
 end
+saveas(gcf, fullfile(result_path, '01_PX4_3D_trajectory.png'));
+fprintf('Saved: 01_PX4_3D_trajectory.png\n');
 
-%% 子图6: GPS高度变化
-subplot(4, 3, 6);
-if ~isempty(gps_alt) && length(gps_time) > 1
-    plot(gps_time, gps_alt, 'r-', 'LineWidth', 2);
-    grid on;
-    xlabel('Time (s)');
-    ylabel('Altitude (m)');
-    title('GPS Altitude Variation');
-else
-    text(0.5, 0.5, 'No GPS Altitude Data', 'HorizontalAlignment', 'center');
-    title('GPS Altitude Variation - No Data');
-end
-
-%% 子图7: IMU vs UWB轨迹对比
-subplot(4, 3, 7);
-if ~isempty(imu_x) && ~isempty(uwb_data) && length(imu_x) > 1 && height(uwb_data) > 1
-    % 绘制IMU轨迹
-    plot(imu_x, imu_y, 'b-', 'LineWidth', 2, 'DisplayName', 'IMU Trajectory');
+%% 图2: PX4 vs UWB轨迹对比
+figure('Name', 'PX4 vs UWB Trajectory Comparison', 'Position', [400, 400, 800, 600]);
+if ~isempty(local_pos_x) && ~isempty(uwb_data) && length(local_pos_x) > 1 && height(uwb_data) > 1
+    % 绘制PX4轨迹
+    plot(local_pos_x, local_pos_y, 'b-', 'LineWidth', 2, 'DisplayName', 'PX4 Local Position');
     hold on;
     
-    % 绘制UWB轨迹（已转换为米）
+    % 绘制UWB轨迹
     uwb_x = uwb_data.x;
     uwb_y = uwb_data.y;
     
-    % 可选：进行坐标对齐（将UWB原点对齐到IMU起点）
-    uwb_x_aligned = uwb_x - uwb_x(1) + imu_x(1);
-    uwb_y_aligned = uwb_y - uwb_y(1) + imu_y(1);
+    % 进行坐标对齐（将UWB原点对齐到PX4起点）
+    uwb_x_aligned = uwb_x - uwb_x(1) + local_pos_x(1);
+    uwb_y_aligned = uwb_y - uwb_y(1) + local_pos_y(1);
     
-    plot(uwb_x_aligned, uwb_y_aligned, 'm--', 'LineWidth', 2, 'DisplayName', 'UWB Trajectory');
+    plot(uwb_x_aligned, uwb_y_aligned, 'm--', 'LineWidth', 2, 'DisplayName', 'UWB Position (Aligned)');
     
     grid on;
     xlabel('X (m)');
     ylabel('Y (m)');
-    title('IMU vs UWB Trajectory Comparison');
+    title('PX4 vs UWB Trajectory Comparison', 'FontSize', 14);
     legend('Location', 'best');
     axis equal;
 else
     text(0.5, 0.5, 'Insufficient Data for Comparison', 'HorizontalAlignment', 'center');
-    title('IMU vs UWB Comparison - Insufficient Data');
+    title('PX4 vs UWB Trajectory Comparison - Insufficient Data');
 end
+saveas(gcf, fullfile(result_path, '02_PX4_vs_UWB_trajectory_comparison.png'));
+fprintf('Saved: 02_PX4_vs_UWB_trajectory_comparison.png\n');
 
-%% 子图8: UWB时间序列
-subplot(4, 3, 8);
-if ~isempty(uwb_data) && height(uwb_data) > 1
-    uwb_time = uwb_data.time;
-    uwb_x = uwb_data.x;
-    uwb_y = uwb_data.y;
-    
-    yyaxis left;
-    plot(uwb_time, uwb_x, 'r-', 'LineWidth', 1.5);
-    ylabel('UWB X (m)');
-    xlabel('Time (s)');
-    
-    yyaxis right;
-    plot(uwb_time, uwb_y, 'b-', 'LineWidth', 1.5);
-    ylabel('UWB Y (m)');
-    
-    title('UWB Position Time Series');
-    grid on;
-else
-    text(0.5, 0.5, 'No UWB Time Data', 'HorizontalAlignment', 'center');
-    title('UWB Time Series - No Data');
-end
-
-%% 子图9: IMU X坐标时间序列对比
-subplot(4, 3, 9);
-if ~isempty(imu_x) && ~isempty(uwb_data) && length(imu_time) > 1 && height(uwb_data) > 1
-    plot(imu_time, imu_x, 'b-', 'LineWidth', 2, 'DisplayName', 'IMU X');
+%% 图3: PX4 vs UWB X坐标对比
+figure('Name', 'PX4 vs UWB X Coordinate Comparison', 'Position', [300, 300, 800, 600]);
+if ~isempty(local_pos_x) && ~isempty(uwb_data) && length(local_pos_time) > 1 && height(uwb_data) > 1
+    plot(local_pos_time, local_pos_x, 'b-', 'LineWidth', 2, 'DisplayName', 'PX4 Local X');
     hold on;
     
     uwb_time = uwb_data.time;
     uwb_x = uwb_data.x;
     
-    % 将UWB X坐标对齐到IMU起点
-    uwb_x_aligned = uwb_x - uwb_x(1) + imu_x(1);
+    % 将UWB X坐标对齐到PX4起点
+    uwb_x_aligned = uwb_x - uwb_x(1) + local_pos_x(1);
     
-    plot(uwb_time, uwb_x_aligned, 'm--', 'LineWidth', 2, 'DisplayName', 'UWB X');
+    plot(uwb_time, uwb_x_aligned, 'm--', 'LineWidth', 2, 'DisplayName', 'UWB X (Aligned)');
     
     xlabel('Time (s)');
     ylabel('X Position (m)');
-    title('X Position Comparison vs Time');
+    title('PX4 vs UWB X Coordinate Comparison', 'FontSize', 14);
     legend('Location', 'best');
     grid on;
 else
     text(0.5, 0.5, 'Insufficient Data', 'HorizontalAlignment', 'center');
-    title('X Position Comparison - No Data');
+    title('PX4 vs UWB X Coordinate Comparison - Insufficient Data');
 end
+saveas(gcf, fullfile(result_path, '03_PX4_vs_UWB_X_comparison.png'));
+fprintf('Saved: 03_PX4_vs_UWB_X_comparison.png\n');
 
-%% 子图10: IMU Y坐标时间序列对比
-subplot(4, 3, 10);
-if ~isempty(imu_y) && ~isempty(uwb_data) && length(imu_time) > 1 && height(uwb_data) > 1
-    plot(imu_time, imu_y, 'b-', 'LineWidth', 2, 'DisplayName', 'IMU Y');
+%% 图4: PX4 vs UWB Y坐标对比
+figure('Name', 'PX4 vs UWB Y Coordinate Comparison', 'Position', [400, 400, 800, 600]);
+if ~isempty(local_pos_y) && ~isempty(uwb_data) && length(local_pos_time) > 1 && height(uwb_data) > 1
+    plot(local_pos_time, local_pos_y, 'b-', 'LineWidth', 2, 'DisplayName', 'PX4 Local Y');
     hold on;
     
     uwb_time = uwb_data.time;
     uwb_y = uwb_data.y;
     
-    % 将UWB Y坐标对齐到IMU起点
-    uwb_y_aligned = uwb_y - uwb_y(1) + imu_y(1);
+    % 将UWB Y坐标对齐到PX4起点
+    uwb_y_aligned = uwb_y - uwb_y(1) + local_pos_y(1);
     
-    plot(uwb_time, uwb_y_aligned, 'm--', 'LineWidth', 2, 'DisplayName', 'UWB Y');
+    plot(uwb_time, uwb_y_aligned, 'm--', 'LineWidth', 2, 'DisplayName', 'UWB Y (Aligned)');
     
     xlabel('Time (s)');
     ylabel('Y Position (m)');
-    title('Y Position Comparison vs Time');
+    title('PX4 vs UWB Y Coordinate Comparison', 'FontSize', 14);
     legend('Location', 'best');
     grid on;
 else
     text(0.5, 0.5, 'Insufficient Data', 'HorizontalAlignment', 'center');
-    title('Y Position Comparison - No Data');
+    title('PX4 vs UWB Y Coordinate Comparison - Insufficient Data');
 end
+saveas(gcf, fullfile(result_path, '04_PX4_vs_UWB_Y_comparison.png'));
+fprintf('Saved: 04_PX4_vs_UWB_Y_comparison.png\n');
 
-%% 子图11: 综合轨迹对比
-subplot(4, 3, 11);
-if ~isempty(imu_x) && ~isempty(gps_lat) && length(imu_x) > 1 && length(gps_lat) > 1
-    % 将GPS坐标转换为本地坐标进行对比
-    if length(gps_lat) > 1
-        % 定义坐标转换系数
-        lat_scale = 1/111320; % 1米对应的纬度变化（度）
-        lon_scale = 1/(111320*cos(deg2rad(mean(gps_lat)))); % 1米对应的经度变化（度）
-        
-        % 计算GPS轨迹的本地坐标偏移
-        lat_offset = (gps_lat - gps_lat(1)) / lat_scale;
-        lon_offset = (gps_lon - gps_lon(1)) / lon_scale;
-        
-        plot(imu_x, imu_y, 'b-', 'LineWidth', 2, 'DisplayName', 'IMU Trajectory');
-        hold on;
-        plot(lon_offset, lat_offset, 'r--', 'LineWidth', 2, 'DisplayName', 'GPS Trajectory');
-        
-        % 如果UWB数据也存在，添加到对比中
-        if ~isempty(uwb_data) && height(uwb_data) > 1
-            uwb_x = uwb_data.x;
-            uwb_y = uwb_data.y;
-            % UWB数据已转换为米，进行坐标对齐
-            uwb_x_aligned = uwb_x - uwb_x(1) + imu_x(1);
-            uwb_y_aligned = uwb_y - uwb_y(1) + imu_y(1);
-            plot(uwb_x_aligned, uwb_y_aligned, 'm:', 'LineWidth', 2, 'DisplayName', 'UWB Trajectory');
-        end
-        
-        grid on;
-        xlabel('X Offset (m)');
-        ylabel('Y Offset (m)');
-        title('All Trajectory Comparison');
-        legend('Location', 'best');
-        axis equal;
-    end
-else
-    text(0.5, 0.5, 'Insufficient Data for Comparison', 'HorizontalAlignment', 'center');
-    title('All Trajectory Comparison - Insufficient Data');
-end
-
-%% 子图12: 位置误差分析
-subplot(4, 3, 12);
-if ~isempty(imu_x) && ~isempty(uwb_data) && length(imu_x) > 1 && height(uwb_data) > 1
-    % 对时间进行插值以便比较
-    uwb_time = uwb_data.time;
-    uwb_x = uwb_data.x;
-    uwb_y = uwb_data.y;
-    
-    % 将UWB数据插值到IMU时间点
-    if length(uwb_time) > 1 && length(imu_time) > 1
-        % 确保时间范围重叠
-        time_start = max(min(imu_time), min(uwb_time));
-        time_end = min(max(imu_time), max(uwb_time));
-        
-        if time_end > time_start
-            % 选择重叠时间范围内的数据
-            imu_mask = (imu_time >= time_start) & (imu_time <= time_end);
-            uwb_x_interp = interp1(uwb_time, uwb_x, imu_time(imu_mask), 'linear', 'extrap');
-            uwb_y_interp = interp1(uwb_time, uwb_y, imu_time(imu_mask), 'linear', 'extrap');
-            
-            % 计算位置误差
-            error_x = imu_x(imu_mask) - uwb_x_interp;
-            error_y = imu_y(imu_mask) - uwb_y_interp;
-            error_total = sqrt(error_x.^2 + error_y.^2);
-            
-            plot(imu_time(imu_mask), error_total, 'k-', 'LineWidth', 2);
-            grid on;
-            xlabel('Time (s)');
-            ylabel('Position Error (m)');
-            title('IMU-UWB Position Error');
-        else
-            text(0.5, 0.5, 'No Time Overlap', 'HorizontalAlignment', 'center');
-            title('Position Error - No Time Overlap');
-        end
-    else
-        text(0.5, 0.5, 'Insufficient Time Data', 'HorizontalAlignment', 'center');
-        title('Position Error - Insufficient Data');
-    end
-else
-    text(0.5, 0.5, 'Insufficient Data', 'HorizontalAlignment', 'center');
-    title('Position Error - No Data');
-end
-
-%% Data Statistics
-fprintf('\n=== Flight Data Statistics ===\n');
-if ~isempty(imu_x)
-    fprintf('IMU Local Coordinate Statistics:\n');
-    fprintf('  X Range: %.2f ~ %.2f m\n', min(imu_x), max(imu_x));
-    fprintf('  Y Range: %.2f ~ %.2f m\n', min(imu_y), max(imu_y));
-    fprintf('  Z Range: %.2f ~ %.2f m\n', min(imu_z), max(imu_z));
-    fprintf('  Flight Distance: %.2f m\n', sum(sqrt(diff(imu_x).^2 + diff(imu_y).^2)));
-end
-
-if ~isempty(gps_lat)
-    fprintf('\nGPS Global Coordinate Statistics:\n');
-    fprintf('  Latitude Range: %.6f ~ %.6f °\n', min(gps_lat), max(gps_lat));
-    fprintf('  Longitude Range: %.6f ~ %.6f °\n', min(gps_lon), max(gps_lon));
-    fprintf('  Altitude Range: %.2f ~ %.2f m\n', min(gps_alt), max(gps_alt));
-end
-
-if ~isempty(uwb_data) && height(uwb_data) > 1
-    uwb_x = uwb_data.x;
-    uwb_y = uwb_data.y;
-    uwb_time = uwb_data.time;
-    fprintf('\nUWB Position Statistics:\n');
-    fprintf('  X Range: %.3f ~ %.3f m\n', min(uwb_x), max(uwb_x));
-    fprintf('  Y Range: %.3f ~ %.3f m\n', min(uwb_y), max(uwb_y));
-    fprintf('  Time Range: %.3f ~ %.3f s\n', min(uwb_time), max(uwb_time));
-    fprintf('  Total UWB points: %d\n', height(uwb_data));
-    fprintf('  UWB Distance: %.3f m\n', sum(sqrt(diff(uwb_x).^2 + diff(uwb_y).^2)));
-end
-
-fprintf('\nChart rendering completed!\n');
-
-%% Save Image
-print('px4_flight_analysis', '-dpng', '-r300');
-fprintf('Image saved as: px4_flight_analysis.png\n');

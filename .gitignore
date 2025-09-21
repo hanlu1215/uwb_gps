@@ -2,3 +2,6 @@
 *.mat
 *.ulg
 *.png
+*.txt
+data/
+__pycache__/

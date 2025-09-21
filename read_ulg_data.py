@@ -1,109 +1,167 @@
 #!/usr/bin/env python3
 """
 PX4 ULG日志文件读取器
-从ULG文件中提取IMU位置估计和GPS位置数据，并保存为MAT文件供MATLAB使用
+从ULG文件中提取所有数据主题，并保存为MAT文件供MATLAB使用
+支持提取所有可用的传感器数据和飞行控制数据
 """
-
 import pyulog
-import numpy as np
-import pandas as pd
 from scipy.io import savemat
 import os
-file_path = "./data/"
+import subprocess
+
+# log_name = "log_0_2025-9-20-21-44-46"
+log_name = "log_1_2025-9-20-22-10-26"
+
+file_path = "./data/" + log_name + "/"
 # ULG文件路径
-# ulg_file = "log_0_2025-9-20-19-02-52.ulg"
-# ulg_file = "log_0_2025-9-20-21-44-46.ulg"
-ulg_file = file_path + "log_1_2025-9-20-22-10-26.ulg"
+ulg_file = file_path +  log_name + ".ulg"
 
+# 使用ulog2csv将ULG文件转为CSV，输出到 file_path/csv 文件夹
+csv_dir = os.path.join(file_path, 'csv')
+os.makedirs(csv_dir, exist_ok=True)
+try:
+    print(f"正在将ULG转换为CSV，输出路径: {csv_dir}")
+    subprocess.run(['ulog2csv', '-o', csv_dir, ulg_file], check=True)
+    print("ULG转换为CSV完成")
+except Exception as e:
+    print(f"转换CSV时出错: {e}")
 
+def sanitize_variable_name(name):
+    """
+    清理变量名，使其符合MATLAB变量命名规则
+    
+    Args:
+        name: 原始变量名
+    
+    Returns:
+        str: 清理后的变量名
+    """
+    import re
+    
+    # 替换特殊字符
+    # 方括号替换为下划线
+    name = re.sub(r'\[(\d+)\]', r'_\1', name)  # [0] -> _0
+    name = re.sub(r'\[\]', '_array', name)     # [] -> _array
+    
+    # 其他特殊字符替换为下划线
+    name = re.sub(r'[^a-zA-Z0-9_]', '_', name)
+    
+    # 确保不以数字开头
+    if name and name[0].isdigit():
+        name = 'var_' + name
+    
+    # 确保不为空
+    if not name:
+        name = 'unnamed_var'
+    
+    # 移除连续的下划线
+    name = re.sub(r'_+', '_', name)
+    
+    # 移除开头和结尾的下划线
+    name = name.strip('_')
+    
+    # MATLAB字段名长度限制为31个字符
+    if len(name) > 31:
+        # 尝试智能截断：保留开头和结尾，中间用下划线连接
+        if '_' in name:
+            parts = name.split('_')
+            if len(parts) >= 2:
+                # 保留第一部分和最后一部分
+                first_part = parts[0]
+                last_part = parts[-1]
+                
+                # 计算可用长度（减去一个下划线）
+                available_len = 31 - 1
+                
+                # 如果第一部分和最后一部分的总长度超过可用长度
+                if len(first_part) + len(last_part) >= available_len:
+                    # 平均分配长度
+                    first_len = available_len // 2
+                    last_len = available_len - first_len
+                    name = first_part[:first_len] + '_' + last_part[-last_len:]
+                else:
+                    # 中间部分用数字或缩写替代
+                    middle_len = available_len - len(first_part) - len(last_part) - 1
+                    if middle_len > 0:
+                        name = first_part + '_' + last_part
+                    else:
+                        name = first_part + '_' + last_part
+            else:
+                # 简单截断
+                name = name[:31]
+        else:
+            # 没有下划线，直接截断
+            name = name[:31]
+    
+    return name
 
 def read_ulg_file(ulg_filename):
     """
-    读取ULG文件并提取位置数据
+    读取ULG文件并提取所有数据
     
     Args:
         ulg_filename: ULG文件路径
     
     Returns:
-        dict: 包含IMU和GPS位置数据的字典
+        dict: 包含所有数据主题的字典，按dataset组织
     """
     try:
         # 读取ULG文件
         print(f"正在读取ULG文件: {ulg_filename}")
         ulog = pyulog.ULog(ulg_filename)
-        
-        # 获取可用的数据主题
-        print("可用的数据主题:")
-        for dataset in ulog.data_list:
-            print(f"  - {dataset.name}")
-        
+        # 将可用的数据主题保存到txt文件
+        topic_names = [dataset.name for dataset in ulog.data_list]
+        txt_filename = os.path.splitext(os.path.basename(ulg_filename))[0] + '.txt'
+        txt_path = os.path.join(os.path.dirname(ulg_filename), txt_filename)
+        try:
+            with open(txt_path, 'w') as f:
+                for name in topic_names:
+                    f.write(name + '\n')
+            print(f"可用的数据主题已保存到: {txt_path}")
+        except Exception as e:
+            print(f"保存主题列表到txt文件时出错: {e}")
         data = {}
         
-        # 提取车辆本地位置信息 (IMU估计的本地坐标)
-        try:
-            vehicle_local_position = ulog.get_dataset('vehicle_local_position')
-            imu_data = vehicle_local_position.data
+        # 遍历所有数据主题并保存
+        for dataset in ulog.data_list:
+            topic_name = dataset.name
+            print(f"正在提取主题: {topic_name}")
             
-            data['imu_time'] = imu_data['timestamp'] * 1e-6  # 转换为秒
-            data['imu_x'] = imu_data['x']  # 本地坐标系X位置
-            data['imu_y'] = imu_data['y']  # 本地坐标系Y位置
-            data['imu_z'] = imu_data['z']  # 本地坐标系Z位置
-            
-            print(f"提取到 {len(data['imu_x'])} 个IMU位置数据点")
-            
-        except Exception as e:
-            print(f"无法提取vehicle_local_position数据: {e}")
-            # 如果无法获取vehicle_local_position，尝试其他替代方案
             try:
-                estimator_local_position = ulog.get_dataset('estimator_local_position')
-                imu_data = estimator_local_position.data
+                # 获取数据集
+                topic_data = ulog.get_dataset(topic_name)
                 
-                data['imu_time'] = imu_data['timestamp'] * 1e-6
-                data['imu_x'] = imu_data['x']
-                data['imu_y'] = imu_data['y']
-                data['imu_z'] = imu_data['z']
+                # 为每个主题创建子字典
+                original_topic_name = topic_name
+                topic_name_clean = sanitize_variable_name(topic_name)
                 
-                print(f"从estimator_local_position提取到 {len(data['imu_x'])} 个IMU位置数据点")
+                # 如果主题名被截断，显示警告
+                if len(original_topic_name) > 31:
+                    print(f"  警告: 主题名被截断 '{original_topic_name}' -> '{topic_name_clean}'")
                 
-            except Exception as e2:
-                print(f"也无法提取estimator_local_position数据: {e2}")
-                data['imu_time'] = np.array([])
-                data['imu_x'] = np.array([])
-                data['imu_y'] = np.array([])
-                data['imu_z'] = np.array([])
-        
-        # 提取GPS全球位置信息
-        try:
-            vehicle_global_position = ulog.get_dataset('vehicle_global_position')
-            gps_data = vehicle_global_position.data
-            
-            data['gps_time'] = gps_data['timestamp'] * 1e-6  # 转换为秒
-            data['gps_lat'] = gps_data['lat']  # 纬度 (度)
-            data['gps_lon'] = gps_data['lon']  # 经度 (度)
-            data['gps_alt'] = gps_data['alt']  # 高度 (米)
-            
-            print(f"提取到 {len(data['gps_lat'])} 个GPS位置数据点")
-            
-        except Exception as e:
-            print(f"无法提取vehicle_global_position数据: {e}")
-            # 尝试其他GPS数据源
-            try:
-                sensor_gps = ulog.get_dataset('sensor_gps')
-                gps_data = sensor_gps.data
+                data[topic_name_clean] = {}
                 
-                data['gps_time'] = gps_data['timestamp'] * 1e-6
-                data['gps_lat'] = gps_data['latitude_deg']
-                data['gps_lon'] = gps_data['longitude_deg']
-                data['gps_alt'] = gps_data['altitude_msl_m']
+                # 遍历该主题的所有字段
+                for field_name, field_data in topic_data.data.items():
+                    # 清理字段名
+                    original_field_name = field_name
+                    field_name_clean = sanitize_variable_name(field_name)
+                    
+                    # 如果字段名被截断，显示警告
+                    if len(original_field_name) > 31:
+                        print(f"    警告: 字段名被截断 '{original_field_name}' -> '{field_name_clean}'")
+                    
+                    # 将时间戳转换为秒
+                    if field_name == 'timestamp':
+                        data[topic_name_clean][field_name_clean] = field_data * 1e-6
+                    else:
+                        data[topic_name_clean][field_name_clean] = field_data
                 
-                print(f"从sensor_gps提取到 {len(data['gps_lat'])} 个GPS位置数据点")
+                print(f"  - 成功提取 {len(topic_data.data)} 个字段，{len(field_data)} 个数据点")
                 
-            except Exception as e2:
-                print(f"也无法提取sensor_gps数据: {e2}")
-                data['gps_time'] = np.array([])
-                data['gps_lat'] = np.array([])
-                data['gps_lon'] = np.array([])
-                data['gps_alt'] = np.array([])
+            except Exception as e:
+                print(f"  - 提取主题 {topic_name} 时出错: {e}")
+                continue
         
         return data
         
@@ -118,6 +176,16 @@ def save_to_mat(data, output_filename):
     try:
         savemat(output_filename, data)
         print(f"数据已保存到: {output_filename}")
+        print(f"保存了 {len(data)} 个变量")
+        
+        # 打印保存的变量名（前20个）
+        var_names = list(data.keys())
+        print("保存的变量包括:")
+        for i, name in enumerate(var_names[:20]):
+            print(f"  - {name}")
+        if len(var_names) > 20:
+            print(f"  ... 还有 {len(var_names)-20} 个变量")
+            
     except Exception as e:
         print(f"保存MAT文件时发生错误: {e}")
 
@@ -134,26 +202,40 @@ def main():
         print("无法读取ULG文件")
         return
     
+    # 生成输出文件路径（与ULG文件在同一文件夹，同名但扩展名为.mat）
+    ulg_dir = os.path.dirname(ulg_file)
+    ulg_basename = os.path.splitext(os.path.basename(ulg_file))[0]
+    output_file = os.path.join(ulg_dir, f"{ulg_basename}.mat")
+    
     # 保存为MAT文件
-    output_file = "px4_flight_data.mat"
     save_to_mat(data, output_file)
     
     # 打印数据摘要
-    print("\n数据摘要:")
-    print(f"IMU数据点: {len(data['imu_x'])}")
-    print(f"GPS数据点: {len(data['gps_lat'])}")
+    print(f"\n=== 数据摘要 ===")
+    print(f"总共提取的主题数: {len(data)}")
+    print(f"输出文件: {output_file}")
     
-    if len(data['imu_x']) > 0:
-        print(f"IMU位置范围:")
-        print(f"  X: {np.min(data['imu_x']):.2f} ~ {np.max(data['imu_x']):.2f} m")
-        print(f"  Y: {np.min(data['imu_y']):.2f} ~ {np.max(data['imu_y']):.2f} m")
-        print(f"  Z: {np.min(data['imu_z']):.2f} ~ {np.max(data['imu_z']):.2f} m")
+    # 显示各主题的字段数和数据点数
+    print(f"\n各主题详细信息:")
+    for topic_name, topic_data in data.items():
+        if isinstance(topic_data, dict) and topic_data:
+            # 获取第一个字段的长度作为数据点数
+            first_field = next(iter(topic_data.values()))
+            if hasattr(first_field, '__len__'):
+                print(f"  {topic_name}: {len(topic_data)} 个字段, {len(first_field)} 个数据点")
+            else:
+                print(f"  {topic_name}: {len(topic_data)} 个字段")
     
-    if len(data['gps_lat']) > 0:
-        print(f"GPS位置范围:")
-        print(f"  纬度: {np.min(data['gps_lat']):.6f} ~ {np.max(data['gps_lat']):.6f} 度")
-        print(f"  经度: {np.min(data['gps_lon']):.6f} ~ {np.max(data['gps_lon']):.6f} 度")
-        print(f"  高度: {np.min(data['gps_alt']):.2f} ~ {np.max(data['gps_alt']):.2f} m")
+    # 显示一些关键主题的字段（如果存在）
+    key_topics = ['vehicle_local_position', 'vehicle_global_position', 
+                  'sensor_combined', 'actuator_outputs']
+    print(f"\n关键主题字段信息:")
+    for topic in key_topics:
+        if topic in data and isinstance(data[topic], dict):
+            fields = list(data[topic].keys())
+            print(f"  {topic}: {fields[:5]}")  # 显示前5个字段
+            if len(fields) > 5:
+                print(f"    ... 还有 {len(fields)-5} 个字段")
 
 if __name__ == "__main__":
     main()
