@@ -4,8 +4,10 @@
 % 日期: 2025-09-20
 clear; clc; close all;
 %% 参数设置
+file_path = "./data/"
 mat_filename = 'px4_flight_data.mat';
-uwb_filename = 'exp_data_20250920_214444.csv'; % UWB数据文件名
+
+uwb_filename = file_path + 'exp_data_20250920_221238.csv'; % UWB数据文件名
 
 %% 读取数据
 % 读取UWB数据

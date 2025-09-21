@@ -9,9 +9,11 @@ import numpy as np
 import pandas as pd
 from scipy.io import savemat
 import os
+file_path = "./data/"
 # ULG文件路径
 # ulg_file = "log_0_2025-9-20-19-02-52.ulg"
-ulg_file = "log_0_2025-9-20-21-44-46.ulg"
+# ulg_file = "log_0_2025-9-20-21-44-46.ulg"
+ulg_file = file_path + "log_1_2025-9-20-22-10-26.ulg"
 
 
 
