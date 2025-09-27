@@ -4,10 +4,6 @@
 % 日期: 2025-09-20
 clear; clc; close all;
 %% 参数设置
-% log_name = "log_0_2025-9-20-21-44-46";
-% log_name = "log_0_2025-9-22-15-46-22";
-% log_name = "log_1_2025-9-22-16-34-26";
-% log_name = "log_3_2025-9-27-16-02-48";
 log_name = "log_4_2025-9-27-16-28-40";
 
 file_path = "./data/" + log_name + "/";
@@ -128,85 +124,78 @@ if ~exist(result_path, 'dir')
     fprintf('Created result directory: %s\n', result_path);
 end
 
-%% 图1: PX4 Local Position 3D轨迹
-figure('Name', 'PX4 Local Position 3D Trajectory');
+%% 数据对齐：
+% 截取PX4数据
+mask_px4 = local_pos_time >= 286 & local_pos_time <= 394;
+local_pos_time = local_pos_time(mask_px4);
+local_pos_x    = local_pos_x(mask_px4);
+local_pos_y    = local_pos_y(mask_px4);
+local_pos_time = local_pos_time - local_pos_time(1);
 
-plot3(local_pos_x, local_pos_y, local_pos_z, 'b-', 'LineWidth', 2);
-hold on;
-plot3(local_pos_x(1), local_pos_y(1), local_pos_z(1), 'go', 'MarkerSize', 8, 'MarkerFaceColor', 'g'); % 起点
-plot3(local_pos_x(end), local_pos_y(end), local_pos_z(end), 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r'); % 终点
-grid on;
-xlabel('X (m)');
-ylabel('Y (m)');
-zlabel('Z (m)');
-% xlim([0 7]);
-% ylim([0,7]);
-legend('Trajectory', 'Start', 'End', 'Location', 'best');
-axis equal;
-box on;set(gca, 'XColor', 'k', 'YColor', 'k');
-fontsize(22, "points"); % 设置字体大小
-saveas(gcf, fullfile(result_path, '01_PX4_3D_trajectory.png'));
-fprintf('Saved: 01_PX4_3D_trajectory.png\n');
-
-%% 图2: PX4 vs UWB轨迹对比
-figure('Name', 'PX4 vs UWB Trajectory Comparison');
-% 绘制PX4轨迹
-plot(local_pos_x, local_pos_y, 'b-', 'LineWidth', 2, 'DisplayName', 'PX4');
-hold on;
-% 绘制UWB轨迹
+% 截取UWB数据：
+mask_uwb = uwb_data.time >= 289 & uwb_data.time <= 397;
+uwb_data = uwb_data(mask_uwb, :);
+uwb_data.time = uwb_data.time - uwb_data.time(1);
 uwb_x = uwb_data.x;
 uwb_y = uwb_data.y;
+
 % 进行坐标对齐（将UWB原点对齐到PX4起点）
-uwb_x_aligned = uwb_x - uwb_x(1) + local_pos_x(1)+3;
-uwb_y_aligned = uwb_y - uwb_y(1) + local_pos_y(1);
+uwb_x_aligned = uwb_x-3.7292;
+uwb_y_aligned = uwb_y-3.8865;
+local_x_aligned = local_pos_x-1.5347;
+local_y_aligned = local_pos_y+2.6128;
+%% 图1: PX4 vs UWB轨迹对比
+figure('Name', 'PX4 vs UWB Trajectory Comparison');
+% 绘制参考圆
+theta = linspace(0, 2*pi, 360);
+cx = 0; cy = 0; r = 2.4;
+x_ref = cx + r*cos(theta);
+y_ref = cy + r*sin(theta);
+% plot(x_ref, y_ref, 'k-.', 'LineWidth', 1.5, 'DisplayName', 'Reference Circle');
+hold on;
+% 绘制PX4轨迹
+plot(local_x_aligned, local_y_aligned, 'b-', 'LineWidth', 2, 'DisplayName', 'PX4');
+hold on;
 plot(uwb_x_aligned, uwb_y_aligned, 'm--', 'LineWidth', 2, 'DisplayName', 'UWB');
-grid on;
+
 xlabel('X (m)');
 ylabel('Y (m)');
-% xlim([-0.5 9]);
-% ylim([-0.5 7]);
-legend('Location', 'best');
+xlim([-4 4]);
+ylim([-4 4]);
+legend('Location', 'north','Orientation','horizontal');
 axis equal;
 box on;set(gca, 'XColor', 'k', 'YColor', 'k');
 fontsize(22, "points"); % 设置字体大小
 saveas(gcf, fullfile(result_path, '02_PX4_vs_UWB_trajectory_comparison.png'));
 fprintf('Saved: 02_PX4_vs_UWB_trajectory_comparison.png\n');
 
-%% 图3: PX4 vs UWB X坐标对比
+%% 图2: PX4 vs UWB X坐标对比
 figure('Name', 'PX4 vs UWB X Coordinate Comparison');
-plot(local_pos_time, local_pos_x, 'b-', 'LineWidth', 2, 'DisplayName', 'PX4');
+
+plot(local_pos_time, local_x_aligned, 'b-', 'LineWidth', 2, 'DisplayName', 'PX4');
 hold on;
-uwb_time = uwb_data.time;
-uwb_x = uwb_data.x;
-% 将UWB X坐标对齐到PX4起点
-uwb_x_aligned = uwb_x - uwb_x(1) + local_pos_x(1)+3;
-plot(uwb_time, uwb_x_aligned, 'm--', 'LineWidth', 2, 'DisplayName', 'UWB');
+plot(uwb_data.time, uwb_x_aligned, 'm--', 'LineWidth', 2, 'DisplayName', 'UWB');
 xlabel('Time T (s)');
 ylabel('X Position Px (m)');
 
-% ylim([-0.5 9]);
-legend('Location', 'best');
-grid on;
+ylim([-4 4]);
+legend('Location', 'north','Orientation','horizontal');
+
 box on;set(gca, 'XColor', 'k', 'YColor', 'k');
 fontsize(22, "points"); % 设置字体大小
 saveas(gcf, fullfile(result_path, '03_PX4_vs_UWB_X_comparison.png'));
 fprintf('Saved: 03_PX4_vs_UWB_X_comparison.png\n');
 
-%% 图4: PX4 vs UWB Y坐标对比
+%% 图3: PX4 vs UWB Y坐标对比
 figure('Name', 'PX4 vs UWB Y Coordinate Comparison');
-plot(local_pos_time, local_pos_y, 'b-', 'LineWidth', 2, 'DisplayName', 'PX4');
+plot(local_pos_time, local_y_aligned, 'b-', 'LineWidth', 2, 'DisplayName', 'PX4');
 hold on;
-uwb_time = uwb_data.time;
-uwb_y = uwb_data.y;
-% 将UWB Y坐标对齐到PX4起点
-uwb_y_aligned = uwb_y - uwb_y(1) + local_pos_y(1);
-plot(uwb_time, uwb_y_aligned, 'm--', 'LineWidth', 2, 'DisplayName', 'UWB');
+plot(uwb_data.time, uwb_y_aligned, 'm--', 'LineWidth', 2, 'DisplayName', 'UWB');
 xlabel('Time T (s)');
 ylabel('Y Position Py (m)');
+ylim([-4 4]);
+legend('Location', 'north','Orientation','horizontal');
 
-% ylim([-0.5 7]);
-legend('Location', 'best');
-grid on;
 box on;set(gca, 'XColor', 'k', 'YColor', 'k');
 fontsize(22, "points"); % 设置字体大小
 saveas(gcf, fullfile(result_path, '04_PX4_vs_UWB_Y_comparison.png'));
